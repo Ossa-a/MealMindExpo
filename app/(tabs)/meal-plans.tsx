@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    FlatList,
     RefreshControl,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -14,6 +13,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Colors, gradients } from '../../constants/Colors';
 import { mealPlanService } from '../../services/api';
+import { getToken } from '../../services/tokenStorage';
 
 interface MealPlan {
   id: string;
@@ -43,22 +43,30 @@ interface Meal {
 }
 
 export default function MealPlansScreen() {
-  const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
+  const [currentPlan, setCurrentPlan] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    loadMealPlans();
+    loadCurrentPlan();
   }, []);
 
-  const loadMealPlans = async () => {
+  const loadCurrentPlan = async () => {
     try {
       setIsLoading(true);
-      const data = await mealPlanService.getMealPlans();
-      setMealPlans(data);
+      const token = await getToken();
+      const res = await fetch(`${process.env.API_URL || ''}/api/meal-plan/current`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      setCurrentPlan(data.plan);
     } catch (error) {
-      console.error('Failed to load meal plans:', error);
+      console.error('Failed to load current meal plan:', error);
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +74,7 @@ export default function MealPlansScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadMealPlans();
+    await loadCurrentPlan();
     setRefreshing(false);
   };
 
@@ -74,10 +82,8 @@ export default function MealPlansScreen() {
     try {
       setIsGenerating(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      
       await mealPlanService.generateMealPlan();
-      await loadMealPlans();
-      
+      await loadCurrentPlan();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -87,97 +93,29 @@ export default function MealPlansScreen() {
     }
   };
 
-  const renderMealPlan = ({ item }: { item: MealPlan }) => (
-    <Animated.View entering={FadeInDown} style={styles.mealPlanCard}>
-      <LinearGradient colors={gradients.card} style={styles.mealPlanGradient}>
-        <View style={styles.mealPlanHeader}>
-          <View>
-            <Text style={styles.mealPlanName}>{item.name}</Text>
-            <Text style={styles.mealPlanDate}>{item.date}</Text>
-          </View>
-          {item.isActive && (
-            <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>Active</Text>
-            </View>
-          )}
-        </View>
+  // Group meals by meal_type for display
+  const groupMealsByType = (meals: any[] = []) => {
+    const grouped: Record<string, any[]> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+    meals.forEach(meal => {
+      const type = meal.meal_type === 'snack' ? 'snack' : meal.meal_type;
+      if (grouped[type]) grouped[type].push(meal);
+    });
+    return grouped;
+  };
 
-        <View style={styles.nutritionSummary}>
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{item.totalCalories}</Text>
-            <Text style={styles.nutritionLabel}>Calories</Text>
-          </View>
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{item.totalProtein}g</Text>
-            <Text style={styles.nutritionLabel}>Protein</Text>
-          </View>
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{item.totalCarbs}g</Text>
-            <Text style={styles.nutritionLabel}>Carbs</Text>
-          </View>
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{item.totalFat}g</Text>
-            <Text style={styles.nutritionLabel}>Fat</Text>
-          </View>
-        </View>
-
-        <View style={styles.mealTypes}>
-          <View style={styles.mealType}>
-            <Text style={styles.mealTypeIcon}>🌅</Text>
-            <Text style={styles.mealTypeText}>
-              {item.meals.breakfast.length} Breakfast
-            </Text>
-          </View>
-          <View style={styles.mealType}>
-            <Text style={styles.mealTypeIcon}>☀️</Text>
-            <Text style={styles.mealTypeText}>
-              {item.meals.lunch.length} Lunch
-            </Text>
-          </View>
-          <View style={styles.mealType}>
-            <Text style={styles.mealTypeIcon}>🌙</Text>
-            <Text style={styles.mealTypeText}>
-              {item.meals.dinner.length} Dinner
-            </Text>
-          </View>
-          <View style={styles.mealType}>
-            <Text style={styles.mealTypeIcon}>🍎</Text>
-            <Text style={styles.mealTypeText}>
-              {item.meals.snacks.length} Snacks
-            </Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.viewPlanButton}
-          onPress={() => router.push(`/meal-plan/${item.id}`)}
-        >
-          <Text style={styles.viewPlanButtonText}>View Details</Text>
-          <Ionicons name="chevron-forward" size={16} color={Colors.primary[500]} />
-        </TouchableOpacity>
-      </LinearGradient>
-    </Animated.View>
-  );
-
-  const renderEmptyState = () => (
-    <Animated.View entering={FadeInDown.delay(300)} style={styles.emptyState}>
-      <Text style={styles.emptyStateIcon}>🍽️</Text>
-      <Text style={styles.emptyStateTitle}>No Meal Plans Yet</Text>
-      <Text style={styles.emptyStateText}>
-        Generate your first AI-powered meal plan to get started with healthy eating!
-      </Text>
-      <TouchableOpacity
-        style={styles.generateFirstButton}
-        onPress={generateNewPlan}
-        disabled={isGenerating}
-      >
-        <LinearGradient colors={gradients.primary} style={styles.generateFirstButtonGradient}>
-          <Text style={styles.generateFirstButtonText}>
-            {isGenerating ? 'Generating...' : 'Generate First Plan'}
-          </Text>
-        </LinearGradient>
-      </TouchableOpacity>
-    </Animated.View>
+  const renderMeal = (meal: any) => (
+    <View key={meal.id} style={{ marginBottom: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16 }}>
+      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>{meal.title}</Text>
+      <Text style={{ color: '#ccc', marginBottom: 4 }}>{meal.description}</Text>
+      <Text style={{ color: '#ccc', fontSize: 12 }}>Calories: {meal.calories} | Protein: {meal.protein}g | Carbs: {meal.carbs}g | Fats: {meal.fats}g</Text>
+      <Text style={{ color: '#ccc', fontSize: 12, marginTop: 4 }}>Ingredients: {meal.ingredients?.join(', ')}</Text>
+      <Text style={{ color: '#ccc', fontSize: 12, marginTop: 4 }}>Instructions: {meal.instructions}</Text>
+    </View>
   );
 
   return (
@@ -186,8 +124,8 @@ export default function MealPlansScreen() {
       <Animated.View entering={FadeInDown.delay(100)} style={styles.header}>
         <View style={styles.headerContent}>
           <View>
-            <Text style={styles.headerTitle}>Meal Plans</Text>
-            <Text style={styles.headerSubtitle}>AI-powered nutrition planning</Text>
+            <Text style={styles.headerTitle}>Current Meal Plan</Text>
+            <Text style={styles.headerSubtitle}>Your AI-powered nutrition plan for the week</Text>
           </View>
           <TouchableOpacity
             style={styles.generateButton}
@@ -204,21 +142,49 @@ export default function MealPlansScreen() {
       {/* Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading meal plans...</Text>
+          <Text style={styles.loadingText}>Loading meal plan...</Text>
         </View>
-      ) : mealPlans.length === 0 ? (
-        renderEmptyState()
+      ) : !currentPlan ? (
+        <Animated.View entering={FadeInDown.delay(300)} style={styles.emptyState}>
+          <Text style={styles.emptyStateIcon}>🍽️</Text>
+          <Text style={styles.emptyStateTitle}>No Meal Plan Yet</Text>
+          <Text style={styles.emptyStateText}>
+            Generate your first AI-powered meal plan to get started with healthy eating!
+          </Text>
+          <TouchableOpacity
+            style={styles.generateFirstButton}
+            onPress={generateNewPlan}
+            disabled={isGenerating}
+          >
+            <LinearGradient colors={gradients.primary} style={styles.generateFirstButtonGradient}>
+              <Text style={styles.generateFirstButtonText}>
+                {isGenerating ? 'Generating...' : 'Generate First Plan'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
       ) : (
-        <FlatList
-          data={mealPlans}
-          renderItem={renderMealPlan}
-          keyExtractor={(item) => item.id}
+        <ScrollView
           contentContainerStyle={styles.listContainer}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
-        />
+        >
+          <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>
+            Week of {currentPlan.week_start_date?.split('T')[0]}
+          </Text>
+          {Object.entries(groupMealsByType(currentPlan.meals)).map(([type, meals]) => (
+            <View key={type} style={{ marginBottom: 24 }}>
+              <Text style={{ color: Colors.primary[500], fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Text>
+              {meals.length === 0 ? (
+                <Text style={{ color: '#ccc', fontStyle: 'italic' }}>No meals planned.</Text>
+              ) : (
+                meals.map(renderMeal)
+              )}
+            </View>
+          ))}
+        </ScrollView>
       )}
     </LinearGradient>
   );
