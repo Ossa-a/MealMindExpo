@@ -1,4 +1,20 @@
-export const colors = {
+export const Colors = {
+  light: {
+    text: '#111',
+    background: '#fff',
+    tint: '#f97316',
+    tabIconDefault: '#ccc',
+    tabIconSelected: '#f97316',
+    // add more as needed
+  },
+  dark: {
+    text: '#fff',
+    background: '#111827',
+    tint: '#f97316',
+    tabIconDefault: '#666',
+    tabIconSelected: '#f97316',
+    // add more as needed
+  },
   primary: {
     50: '#fff7ed',
     500: '#f97316',

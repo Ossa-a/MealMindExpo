@@ -2,7 +2,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Dimensions,
     Keyboard,
@@ -16,8 +16,9 @@ import {
     View,
 } from 'react-native';
 import Animated, { FadeInRight, FadeOutLeft } from 'react-native-reanimated';
-import { colors, gradients } from '../constants/Colors';
+import { Colors, gradients } from '../constants/Colors';
 import { profileService } from '../services/api';
+import { getToken } from '../services/tokenStorage';
 
 const { width } = Dimensions.get('window');
 
@@ -70,6 +71,25 @@ export default function OnboardingScreen() {
   const [formData, setFormData] = useState<OnboardingData>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  useEffect(() => {
+    async function checkAccess() {
+      const token = await getToken();
+      if (!token) {
+        router.replace('/'); // redirect to login
+        return;
+      }
+      try {
+        const profile = await profileService.getProfile();
+        if (profile) {
+          router.replace('/(tabs)/dashboard'); // already has profile
+        }
+      } catch (error) {
+        // If error, assume no profile and allow onboarding
+      }
+    }
+    checkAccess();
+  }, []);
 
   const updateFormData = (key: keyof OnboardingData, value: any) => {
     setFormData(prev => ({ ...prev, [key]: value }));
@@ -223,29 +243,49 @@ export default function OnboardingScreen() {
               </View>
 
               <Text style={styles.inputLabel}>Date of Birth</Text>
-              <TouchableOpacity
-                style={styles.input}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={{ color: formData.date_of_birth ? 'white' : '#ccc' }}>
-                  {formData.date_of_birth || 'Select date'}
-                </Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={formData.date_of_birth ? new Date(formData.date_of_birth) : new Date()}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (selectedDate) {
-                      // Format as YYYY-MM-DD
-                      const iso = selectedDate.toISOString().split('T')[0];
-                      updateFormData('date_of_birth', iso);
-                    }
+              {Platform.OS === 'web' ? (
+                <input
+                  type="date"
+                  value={formData.date_of_birth || ''}
+                  onChange={e => updateFormData('date_of_birth', e.target.value)}
+                  style={{
+                    background: 'transparent',
+                    color: 'white',
+                    border: 'none',
+                    borderBottom: '1px solid #ccc',
+                    fontSize: 16,
+                    padding: 10,
+                    marginBottom: 15,
+                    width: '100%',
                   }}
-                  maximumDate={new Date()}
                 />
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.input}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={{ color: formData.date_of_birth ? 'white' : '#ccc' }}>
+                      {formData.date_of_birth || 'Select date'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={formData.date_of_birth ? new Date(formData.date_of_birth) : new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, selectedDate) => {
+                        setShowDatePicker(false);
+                        if (selectedDate) {
+                          // Format as YYYY-MM-DD
+                          const iso = selectedDate.toISOString().split('T')[0];
+                          updateFormData('date_of_birth', iso);
+                        }
+                      }}
+                      maximumDate={new Date()}
+                    />
+                  )}
+                </>
               )}
             </View>
           </Animated.View>
@@ -366,7 +406,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: '100%',
-    backgroundColor: colors.primary[500],
+    backgroundColor: Colors.primary[500],
     borderRadius: 2,
   },
   stepCounter: {
@@ -402,7 +442,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   selectedCard: {
-    borderColor: colors.primary[500],
+    borderColor: Colors.primary[500],
     backgroundColor: 'rgba(249,115,22,0.2)',
   },
   goalIcon: {

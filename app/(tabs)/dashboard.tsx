@@ -1,18 +1,21 @@
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { colors, gradients } from '../../constants/Colors';
+import { Colors, gradients } from '../../constants/Colors';
 import { mealPlanService, profileService } from '../../services/api';
+import { deleteToken, getToken } from '../../services/tokenStorage';
 
 const { width } = Dimensions.get('window');
 
@@ -38,6 +41,8 @@ export default function DashboardScreen() {
   });
   const [refreshing, setRefreshing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [name, setName] = useState('');
+  const router = useRouter();
 
   useEffect(() => {
     loadDashboardData();
@@ -45,6 +50,17 @@ export default function DashboardScreen() {
 
   const loadDashboardData = async () => {
     try {
+      // Fetch user name from /api/user
+      const userResponse = await fetch(`${process.env.API_URL || ''}/api/user`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...(await getToken() ? { 'Authorization': `Bearer ${await getToken()}` } : {}),
+        },
+      });
+      const userData = await userResponse.json();
+      setName(userData.user?.name || '');
+
       const profile = await profileService.getProfile();
       // Map profile fields to stats as needed
       setStats({
@@ -96,8 +112,21 @@ export default function DashboardScreen() {
       >
         {/* Header */}
         <Animated.View entering={FadeInDown.delay(100)} style={styles.header}>
-          <Text style={styles.greeting}>Good morning! 👋</Text>
-          <Text style={styles.subtitle}>Ready to plan your meals?</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={styles.greeting}>Good morning{name ? `, ${name}` : ''}! 👋</Text>
+              <Text style={styles.subtitle}>Ready to plan your meals?</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* Remove profile icon button */}
+              <TouchableOpacity onPress={async () => {
+                await deleteToken();
+                router.replace('/');
+              }} style={{ padding: 8 }}>
+                <Ionicons name="log-out-outline" size={28} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
+          </View>
         </Animated.View>
 
         {/* Calorie Tracking Card */}
@@ -243,7 +272,7 @@ const styles = StyleSheet.create({
   caloriePercentage: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: colors.primary[500],
+    color: Colors.primary[500],
   },
   calorieNumbers: {
     flexDirection: 'row',
@@ -276,7 +305,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: colors.primary[500],
+    backgroundColor: Colors.primary[500],
     borderRadius: 4,
   },
   macrosContainer: {

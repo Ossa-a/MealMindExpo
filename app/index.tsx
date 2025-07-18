@@ -5,17 +5,18 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
-import { colors, gradients } from '../constants/Colors';
+import { useToast } from 'react-native-toast-notifications';
+import { Colors, gradients } from '../constants/Colors';
 import { authService } from '../services/api';
 
 export default function LoginScreen() {
@@ -25,17 +26,21 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const toast = useToast();
 
   const handleAuth = async () => {
-    console.log('Login/Register button pressed');
     try {
       setIsLoading(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       if (isLogin) {
-        console.log('About to call authService.login');
         const response = await authService.login({ email, password });
         if (response.access_token) {
+          if (toast) {
+            toast.show('Login successful!', { type: 'success' });
+          } else {
+            Alert.alert('Success', 'Login successful!');
+          }
           // Token is already set in the API client
           try {
             const profile = await authService.getProfile();
@@ -64,17 +69,44 @@ export default function LoginScreen() {
           Alert.alert('Error', 'Please enter your name');
           return;
         }
-        console.log('About to call authService.register');
-        const response = await authService.register({
-          name,
-          email,
-          password,
-          password_confirmation: confirmPassword,
-        });
-        if (response.access_token) {
-          router.replace('/onboarding');
-        } else {
-          Alert.alert('Error', 'Registration failed. Please try again.');
+        // Log registration payload for debugging
+        console.log('Register payload:', { name, email, password, password_confirmation: confirmPassword });
+        try {
+          const response = await authService.register({
+            name,
+            email,
+            password,
+            password_confirmation: confirmPassword,
+          });
+          // Treat any response with a 'message' property as success
+          if (response && (response.access_token || response.message)) {
+            if (toast) {
+              toast.show('Registration successful! Please log in.', { type: 'success' });
+            } else {
+              Alert.alert('Success', 'Registration successful! Please log in.');
+            }
+            setIsLogin(true);
+            setPassword('');
+            setConfirmPassword('');
+          } else {
+            Alert.alert('Error', 'Registration failed. Please try again.');
+          }
+        } catch (error: any) {
+          console.error('Registration error:', error);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          // Try to extract validation errors from backend
+          let message = 'An error occurred';
+          if (error && error.message) {
+            message = error.message;
+            // Try to parse JSON if possible
+            try {
+              const errObj = JSON.parse(error.message);
+              if (errObj.errors) {
+                message = Object.values(errObj.errors).flat().join('\n');
+              }
+            } catch {}
+          }
+          Alert.alert('Registration Error', message);
         }
       }
     } catch (error) {
@@ -138,42 +170,43 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            {!isLogin && (
-              <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Name"
-                  placeholderTextColor="#666"
-                  value={name}
-                  onChangeText={setName}
-                  autoCapitalize="words"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  placeholderTextColor="#666"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password"
-                  placeholderTextColor="#666"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm Password"
-                  placeholderTextColor="#666"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry
-                />
-              </>
+            {/* Always show email and password fields */}
+            {(!isLogin) && (
+              <TextInput
+                style={styles.input}
+                placeholder="Name"
+                placeholderTextColor="#666"
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+              />
+            )}
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor="#666"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#666"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+            {(!isLogin) && (
+              <TextInput
+                style={styles.input}
+                placeholder="Confirm Password"
+                placeholderTextColor="#666"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+              />
             )}
           </View>
 
@@ -242,7 +275,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   activeToggle: {
-    backgroundColor: colors.primary[500],
+    backgroundColor: Colors.primary[500],
   },
   toggleText: {
     color: '#ccc',
@@ -281,7 +314,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   biometricText: {
-    color: colors.primary[500],
+    color: Colors.primary[500],
     fontSize: 16,
   },
 });
