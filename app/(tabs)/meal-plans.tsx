@@ -1,8 +1,11 @@
+import { API_URL } from '@env';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
+    Modal,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -47,16 +50,28 @@ export default function MealPlansScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedMeal, setSelectedMeal] = useState<any>(null);
+  const [showMealModal, setShowMealModal] = useState(false);
+  const [eatenMeals, setEatenMeals] = useState<{ [mealId: string]: boolean }>({});
 
   useEffect(() => {
     loadCurrentPlan();
+    // Load eatenMeals from storage on mount
+    AsyncStorage.getItem('eatenMeals').then(data => {
+      if (data) setEatenMeals(JSON.parse(data));
+    });
   }, []);
+
+  // Persist eatenMeals to storage whenever it changes
+  useEffect(() => {
+    AsyncStorage.setItem('eatenMeals', JSON.stringify(eatenMeals));
+  }, [eatenMeals]);
 
   const loadCurrentPlan = async () => {
     try {
       setIsLoading(true);
       const token = await getToken();
-      const res = await fetch(`${process.env.API_URL || ''}/api/meal-plan/current`, {
+      const res = await fetch(`${API_URL}/api/meal-plan/current`, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -93,29 +108,70 @@ export default function MealPlansScreen() {
     }
   };
 
-  // Group meals by meal_type for display
-  const groupMealsByType = (meals: any[] = []) => {
-    const grouped: Record<string, any[]> = {
-      breakfast: [],
-      lunch: [],
-      dinner: [],
-      snack: [],
-    };
+  // Group meals by day_of_week and meal_type
+  const groupMealsByDay = (meals: any[] = []) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const grouped: Record<string, any[]> = {};
+    for (let i = 1; i <= 7; i++) {
+      grouped[days[i - 1]] = [];
+    }
     meals.forEach(meal => {
-      const type = meal.meal_type === 'snack' ? 'snack' : meal.meal_type;
-      if (grouped[type]) grouped[type].push(meal);
+      const dayIdx = meal.pivot?.day_of_week || 1;
+      const dayName = days[dayIdx - 1];
+      if (grouped[dayName]) grouped[dayName].push(meal);
     });
     return grouped;
   };
 
-  const renderMeal = (meal: any) => (
-    <View key={meal.id} style={{ marginBottom: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16 }}>
-      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>{meal.title}</Text>
-      <Text style={{ color: '#ccc', marginBottom: 4 }}>{meal.description}</Text>
-      <Text style={{ color: '#ccc', fontSize: 12 }}>Calories: {meal.calories} | Protein: {meal.protein}g | Carbs: {meal.carbs}g | Fats: {meal.fats}g</Text>
-      <Text style={{ color: '#ccc', fontSize: 12, marginTop: 4 }}>Ingredients: {meal.ingredients?.join(', ')}</Text>
-      <Text style={{ color: '#ccc', fontSize: 12, marginTop: 4 }}>Instructions: {meal.instructions}</Text>
-    </View>
+  // Helper to get meal type label
+  const mealTypeLabel = (type: string) => {
+    switch (type) {
+      case 'breakfast': return 'Breakfast';
+      case 'lunch': return 'Lunch';
+      case 'dinner': return 'Dinner';
+      case 'snack': return 'Snack';
+      default: return type;
+    }
+  };
+
+  // Calculate total calories eaten for today
+  const getTodayIndex = () => {
+    // JS: 0=Sunday, 1=Monday, ..., 6=Saturday; API: 1=Monday, ..., 7=Sunday
+    const jsDay = new Date().getDay();
+    return jsDay === 0 ? 7 : jsDay; // convert JS Sunday (0) to 7
+  };
+  const todayIdx = getTodayIndex();
+  const totalCaloriesEatenToday = currentPlan?.meals?.reduce((sum: number, meal: any) => {
+    return (eatenMeals[meal.id] && meal.pivot?.day_of_week === todayIdx) ? sum + (meal.calories || 0) : sum;
+  }, 0) || 0;
+
+  // Modal for meal details
+  const renderMealModal = () => (
+    <Modal visible={showMealModal} animationType="slide" transparent onRequestClose={() => setShowMealModal(false)}>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={() => setShowMealModal(false)}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ backgroundColor: '#222', borderRadius: 16, padding: 24, width: '90%' }}
+          onPress={e => e.stopPropagation && e.stopPropagation()}
+        >
+          <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20, marginBottom: 8 }}>{selectedMeal?.title}</Text>
+          <Text style={{ color: Colors.primary[500], fontWeight: 'bold', marginBottom: 8 }}>{mealTypeLabel(selectedMeal?.meal_type)}</Text>
+          <Text style={{ color: '#ccc', marginBottom: 8 }}>{selectedMeal?.description}</Text>
+          <Text style={{ color: '#ccc', fontSize: 12, marginBottom: 8 }}>Calories: {selectedMeal?.calories} | Protein: {selectedMeal?.protein}g | Carbs: {selectedMeal?.carbs}g | Fats: {selectedMeal?.fats}g</Text>
+          <Text style={{ color: '#ccc', fontWeight: 'bold', marginTop: 8 }}>Ingredients:</Text>
+          <Text style={{ color: '#ccc', marginBottom: 8 }}>{selectedMeal?.ingredients?.join(', ')}</Text>
+          <Text style={{ color: '#ccc', fontWeight: 'bold', marginTop: 8 }}>Instructions:</Text>
+          <Text style={{ color: '#ccc', marginBottom: 16 }}>{selectedMeal?.instructions}</Text>
+          <TouchableOpacity onPress={() => setShowMealModal(false)} style={{ alignSelf: 'flex-end', marginTop: 8 }}>
+            <Text style={{ color: Colors.primary[500], fontWeight: 'bold', fontSize: 16 }}>Close</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
   );
 
   return (
@@ -172,20 +228,35 @@ export default function MealPlansScreen() {
           <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>
             Week of {currentPlan.week_start_date?.split('T')[0]}
           </Text>
-          {Object.entries(groupMealsByType(currentPlan.meals)).map(([type, meals]) => (
-            <View key={type} style={{ marginBottom: 24 }}>
-              <Text style={{ color: Colors.primary[500], fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </Text>
+          <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 16, marginBottom: 16 }}>
+            Total Calories Eaten Today: {totalCaloriesEatenToday}
+          </Text>
+          {Object.entries(groupMealsByDay(currentPlan.meals)).map(([day, meals]) => (
+            <View key={day} style={{ marginBottom: 32 }}>
+              <Text style={{ color: Colors.primary[500], fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>{day}</Text>
               {meals.length === 0 ? (
                 <Text style={{ color: '#ccc', fontStyle: 'italic' }}>No meals planned.</Text>
               ) : (
-                meals.map(renderMeal)
+                meals.map(meal => (
+                  <View key={meal.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, backgroundColor: eatenMeals[meal.id] ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.08)', borderRadius: 8, padding: 12 }}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => { setSelectedMeal(meal); setShowMealModal(true); }}>
+                      <Text style={{ color: eatenMeals[meal.id] ? '#22c55e' : 'white', fontWeight: 'bold', fontSize: 15, textDecorationLine: eatenMeals[meal.id] ? 'line-through' : 'none' }}>{meal.title}</Text>
+                      <Text style={{ color: '#ccc', fontSize: 13 }}>{mealTypeLabel(meal.meal_type)}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setEatenMeals(prev => ({ ...prev, [meal.id]: !prev[meal.id] }))}
+                      style={{ marginLeft: 10, backgroundColor: eatenMeals[meal.id] ? '#22c55e' : '#333', borderRadius: 16, padding: 8 }}
+                    >
+                      <Ionicons name={eatenMeals[meal.id] ? 'checkmark-done' : 'checkmark-outline'} size={20} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                ))
               )}
             </View>
           ))}
         </ScrollView>
       )}
+      {showMealModal && renderMealModal()}
     </LinearGradient>
   );
 }

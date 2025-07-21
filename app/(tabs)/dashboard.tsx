@@ -1,4 +1,6 @@
+import { API_URL } from '@env';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -22,6 +24,7 @@ const { width } = Dimensions.get('window');
 interface DashboardStats {
   caloriesConsumed: number;
   caloriesTarget: number;
+  dailyCaloriesTarget: number;
   mealsPlanned: number;
   streakDays: number;
   protein: number;
@@ -33,6 +36,7 @@ export default function DashboardScreen() {
   const [stats, setStats] = useState<DashboardStats>({
     caloriesConsumed: 0,
     caloriesTarget: 2000,
+    dailyCaloriesTarget: 2000,
     mealsPlanned: 0,
     streakDays: 0,
     protein: 0,
@@ -43,9 +47,13 @@ export default function DashboardScreen() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [name, setName] = useState('');
   const router = useRouter();
+  const [eatenMeals, setEatenMeals] = useState<{ [mealId: string]: boolean }>({});
+  const [currentPlan, setCurrentPlan] = useState<any>(null);
 
   useEffect(() => {
     loadDashboardData();
+    loadEatenMeals();
+    loadCurrentPlan();
   }, []);
 
   const loadDashboardData = async () => {
@@ -66,6 +74,7 @@ export default function DashboardScreen() {
       setStats({
         caloriesConsumed: profile.calories_consumed || 0,
         caloriesTarget: profile.calories_target || 2000,
+        dailyCaloriesTarget: profile.daily_calories_target || 2000,
         mealsPlanned: profile.meals_planned || 0,
         streakDays: profile.streak_days || 0,
         protein: profile.protein || 0,
@@ -76,6 +85,41 @@ export default function DashboardScreen() {
       console.error('Failed to load dashboard data:', error);
     }
   };
+
+  const loadEatenMeals = async () => {
+    const data = await AsyncStorage.getItem('eatenMeals');
+    if (data) setEatenMeals(JSON.parse(data));
+  };
+
+  const loadCurrentPlan = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/api/meal-plan/current`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      setCurrentPlan(data.plan);
+    } catch (error) {
+      console.error('Failed to load current meal plan:', error);
+    }
+  };
+
+  // Calculate total calories eaten for today
+  const getTodayIndex = () => {
+    const jsDay = new Date().getDay();
+    return jsDay === 0 ? 7 : jsDay;
+  };
+  const todayIdx = getTodayIndex();
+  const totalCaloriesEatenToday = currentPlan?.meals?.reduce((sum: number, meal: any) => {
+    return (eatenMeals[meal.id] && meal.pivot?.day_of_week === todayIdx) ? sum + (meal.calories || 0) : sum;
+  }, 0) || 0;
+
+  // Use dailyCaloriesTarget from profile as max calories
+  const maxCalories = stats.dailyCaloriesTarget || stats.caloriesTarget;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -101,7 +145,8 @@ export default function DashboardScreen() {
     }
   };
 
-  const calorieProgress = stats.caloriesTarget > 0 ? (stats.caloriesConsumed / stats.caloriesTarget) * 100 : 0;
+  // Make the calorie progress bar dynamic based on actual calories eaten today and the dynamic maxCalories
+  const calorieProgress = maxCalories > 0 ? (totalCaloriesEatenToday / maxCalories) * 100 : 0;
 
   return (
     <LinearGradient colors={gradients.background} style={styles.container}>
@@ -138,15 +183,15 @@ export default function DashboardScreen() {
             </View>
             
             <View style={styles.calorieNumbers}>
-              <Text style={styles.caloriesConsumed}>{stats.caloriesConsumed}</Text>
+              <Text style={styles.caloriesConsumed}>{totalCaloriesEatenToday}</Text>
               <Text style={styles.caloriesSeparator}>/</Text>
-              <Text style={styles.caloriesTarget}>{stats.caloriesTarget}</Text>
+              <Text style={styles.caloriesTarget}>{maxCalories}</Text>
             </View>
 
             <View style={styles.progressBarContainer}>
               <View style={styles.progressBarBackground}>
                 <Animated.View 
-                  style={[
+                  style={[ 
                     styles.progressBarFill,
                     { width: `${Math.min(calorieProgress, 100)}%` }
                   ]} 
