@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -49,6 +50,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const [eatenMeals, setEatenMeals] = useState<{ [mealId: string]: boolean }>({});
   const [currentPlan, setCurrentPlan] = useState<any>(null);
+  const [showTrackMealModal, setShowTrackMealModal] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -118,6 +120,34 @@ export default function DashboardScreen() {
     return (eatenMeals[meal.id] && meal.pivot?.day_of_week === todayIdx) ? sum + (meal.calories || 0) : sum;
   }, 0) || 0;
 
+  // Calculate meals planned for today
+  const mealsPlannedToday = currentPlan?.meals?.filter((meal: any) => 
+    meal.pivot?.day_of_week === todayIdx
+  ).length || 0;
+
+  // Calculate day streak based on eaten meals
+  const calculateDayStreak = () => {
+    if (!eatenMeals || Object.keys(eatenMeals).length === 0) return 0;
+    
+    // Get all unique dates where meals were eaten
+    const eatenDates = new Set<string>();
+    currentPlan?.meals?.forEach((meal: any) => {
+      if (eatenMeals[meal.id]) {
+        // Convert day_of_week to actual date (simplified - assumes current week)
+        const today = new Date();
+        const dayOffset = (meal.pivot?.day_of_week || 1) - todayIdx;
+        const mealDate = new Date(today);
+        mealDate.setDate(today.getDate() + dayOffset);
+        eatenDates.add(mealDate.toDateString());
+      }
+    });
+    
+    // Count consecutive days (simplified calculation)
+    return eatenDates.size;
+  };
+
+  const dayStreak = calculateDayStreak();
+
   // Use dailyCaloriesTarget from profile as max calories
   const maxCalories = stats.dailyCaloriesTarget || stats.caloriesTarget;
 
@@ -147,6 +177,119 @@ export default function DashboardScreen() {
 
   // Make the calorie progress bar dynamic based on actual calories eaten today and the dynamic maxCalories
   const calorieProgress = maxCalories > 0 ? (totalCaloriesEatenToday / maxCalories) * 100 : 0;
+
+  // Helper to get meal type label
+  const mealTypeLabel = (type: string) => {
+    switch (type) {
+      case 'breakfast': return 'Breakfast';
+      case 'lunch': return 'Lunch';
+      case 'dinner': return 'Dinner';
+      case 'snack': return 'Snack';
+      default: return type;
+    }
+  };
+
+  // Get today's meals
+  const getTodayMeals = () => {
+    if (!currentPlan?.meals) return [];
+    const todayIdx = getTodayIndex();
+    return currentPlan.meals.filter((meal: any) => meal.pivot?.day_of_week === todayIdx);
+  };
+
+  const handleTrackMeal = () => {
+    setShowTrackMealModal(true);
+  };
+
+  const toggleMealEaten = (mealId: string) => {
+    setEatenMeals(prev => ({ ...prev, [mealId]: !prev[mealId] }));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  // Render track meal modal
+  const renderTrackMealModal = () => (
+    <Modal 
+      visible={showTrackMealModal} 
+      animationType="slide" 
+      transparent 
+      onRequestClose={() => setShowTrackMealModal(false)}
+    >
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={() => setShowTrackMealModal(false)}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ backgroundColor: '#222', borderRadius: 16, padding: 24, width: '90%', maxHeight: '80%' }}
+          onPress={e => e.stopPropagation && e.stopPropagation()}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>Track Today's Meals</Text>
+            <TouchableOpacity onPress={() => setShowTrackMealModal(false)}>
+              <Ionicons name="close" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {getTodayMeals().length === 0 ? (
+              <Text style={{ color: '#ccc', textAlign: 'center', fontStyle: 'italic' }}>
+                No meals planned for today. Generate a meal plan first!
+              </Text>
+            ) : (
+              getTodayMeals().map((meal: any) => (
+                <View 
+                  key={meal.id} 
+                  style={{ 
+                    flexDirection: 'row', 
+                    alignItems: 'center', 
+                    marginBottom: 12, 
+                    backgroundColor: eatenMeals[meal.id] ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.08)', 
+                    borderRadius: 8, 
+                    padding: 12 
+                  }}
+                >
+                  <TouchableOpacity style={{ flex: 1 }}>
+                    <Text style={{ 
+                      color: eatenMeals[meal.id] ? '#22c55e' : 'white', 
+                      fontWeight: 'bold', 
+                      fontSize: 15, 
+                      textDecorationLine: eatenMeals[meal.id] ? 'line-through' : 'none' 
+                    }}>
+                      {meal.title}
+                    </Text>
+                    <Text style={{ color: '#ccc', fontSize: 13 }}>
+                      {mealTypeLabel(meal.meal_type)} • {meal.calories} cal
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => toggleMealEaten(meal.id)}
+                    style={{ 
+                      marginLeft: 10, 
+                      backgroundColor: eatenMeals[meal.id] ? '#22c55e' : '#333', 
+                      borderRadius: 16, 
+                      padding: 8 
+                    }}
+                  >
+                    <Ionicons 
+                      name={eatenMeals[meal.id] ? 'checkmark-done' : 'checkmark-outline'} 
+                      size={20} 
+                      color="white" 
+                    />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </ScrollView>
+          
+          <View style={{ marginTop: 20, alignItems: 'center' }}>
+            <Text style={{ color: '#ccc', fontSize: 14, textAlign: 'center' }}>
+              Total calories eaten today: {totalCaloriesEatenToday}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
 
   return (
     <LinearGradient colors={gradients.background} style={styles.container}>
@@ -232,7 +375,10 @@ export default function DashboardScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={handleTrackMeal}
+          >
             <LinearGradient colors={gradients.secondary} style={styles.actionButtonGradient}>
               <Text style={styles.actionButtonIcon}>📱</Text>
               <Text style={styles.actionButtonText}>Track Meal</Text>
@@ -244,14 +390,14 @@ export default function DashboardScreen() {
         <Animated.View entering={FadeInDown.delay(400)} style={styles.statsGrid}>
           <View style={styles.statCard}>
             <LinearGradient colors={gradients.card} style={styles.statCardGradient}>
-              <Text style={styles.statNumber}>{stats.mealsPlanned}</Text>
+              <Text style={styles.statNumber}>{mealsPlannedToday}</Text>
               <Text style={styles.statLabel}>Meals Planned</Text>
             </LinearGradient>
           </View>
 
           <View style={styles.statCard}>
             <LinearGradient colors={gradients.card} style={styles.statCardGradient}>
-              <Text style={styles.statNumber}>{stats.streakDays}</Text>
+              <Text style={styles.statNumber}>{dayStreak}</Text>
               <Text style={styles.statLabel}>Day Streak</Text>
             </LinearGradient>
           </View>
@@ -268,6 +414,7 @@ export default function DashboardScreen() {
           </View>
         </Animated.View>
       </ScrollView>
+      {showTrackMealModal && renderTrackMealModal()}
     </LinearGradient>
   );
 }
